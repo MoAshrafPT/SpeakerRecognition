@@ -11,9 +11,11 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, message="X does not have valid feature names")
 warnings.filterwarnings("ignore", category=UserWarning, message=".*The tree method `gpu_hist` is deprecated.*")
 warnings.filterwarnings("ignore", category=UserWarning, message=".*Falling back to prediction using DMatrix.*")
+
 def predict_voice_attributes(audio_file_path):
     """
     Predict both gender and age group from an audio file using the trained models.
+    Uses a gender-aware pipeline for better age prediction accuracy.
     
     Args:
         audio_file_path: Path to the audio file
@@ -45,24 +47,21 @@ def predict_voice_attributes(audio_file_path):
         y, sr = librosa.load(temp_output_path, sr=16000)
         features_dict = extract_features(y, sr)
         
-        # Step 3: Predict gender
-        gender_prediction = predict_gender(features_dict)
+        # Step 3: First predict gender
+        gender_prediction, gender_confidence = predict_gender(features_dict)
         
-        # Step 4: Predict age
-        age_prediction = predict_age(features_dict)
+        # Step 4: Use gender-specific age prediction
+        age_prediction, age_confidence = predict_age_with_gender(features_dict, gender_prediction)
         
         # Step 5: Clean up temporary file
         if os.path.exists(temp_output_path):
             os.remove(temp_output_path)
         
         # Return combined results
-        if gender_prediction and age_prediction:
-            gender, gender_confidence = gender_prediction
-            age, age_confidence = age_prediction
-            
+        if gender_prediction is not None and age_prediction is not None:
             # Map numerical labels to descriptive classes
-            gender_label = "Male" if gender == 0 else "Female"
-            age_label = "Young (20s)" if age == 0 else "Older (50s)"
+            gender_label = "Male" if gender_prediction == 0 else "Female"
+            age_label = "Young (20s)" if age_prediction == 0 else "Older (50s)"
             
             combined_label = f"{gender_label}, {age_label}"
             
@@ -132,8 +131,8 @@ def predict_gender(features_dict):
         X = np.array(features).reshape(1, -1)
         
         # Load gender model and scaler
-        model_path = 'gender_model.joblib'
-        scaler_path = 'gender_scaler.joblib'
+        model_path = 'models/gender_model.joblib'
+        scaler_path = 'models/gender_scaler.joblib'
         
         if not os.path.exists(model_path) or not os.path.exists(scaler_path):
             print(f"Error: Gender model or scaler file not found")
@@ -155,10 +154,19 @@ def predict_gender(features_dict):
         
     except Exception as e:
         print(f"Error during gender prediction: {str(e)}")
-        return None
+        return None, 0.0
 
-def predict_age(features_dict):
-    """Extract age-specific features and predict using age model"""
+def predict_age_with_gender(features_dict, gender_prediction):
+    """
+    Extract age-specific features and predict using gender-specific models.
+    
+    Args:
+        features_dict: Dictionary of extracted audio features
+        gender_prediction: Gender classification (0=Male, 1=Female)
+    
+    Returns:
+        Prediction result (0=Young, 1=Older) and confidence
+    """
     try:
         # Prepare age-specific features
         features = []
@@ -172,7 +180,7 @@ def predict_age(features_dict):
         # Selected MFCCs (first 5 mean, first 12 std)
         for i in range(1, 6):
             features.append(features_dict[f'mfcc_mean_{i}'])
-        for i in range(1, 13):  # Changed from range(1, 6) to range(1, 13)
+        for i in range(1, 13):
             features.append(features_dict[f'mfcc_std_{i}'])
         
         # Spectral shape
@@ -209,14 +217,52 @@ def predict_age(features_dict):
         # Reshape for model input
         X = np.array(features).reshape(1, -1)
         
-        # Load age model and scaler
-        model_path = 'age_model.joblib'
-        scaler_path = 'age_scaler.joblib'
+        # Check if we have gender-specific models
+        config_path = 'models/age_feature_config.joblib'
         
-        if not os.path.exists(model_path) or not os.path.exists(scaler_path):
-            print(f"Error: Age model or scaler file not found")
-            return None
+        # Default paths
+        if gender_prediction == 0:  # Male
+            model_path = 'models/age_model_male.joblib'
+            scaler_path = 'models/age_scaler_male.joblib'
+            gender_name = "Male"
+        else:  # Female
+            model_path = 'models/age_model_female.joblib'
+            scaler_path = 'models/age_scaler_female.joblib'
+            gender_name = "Female"
+            
+        # Check if config exists to override default paths
+        if os.path.exists(config_path):
+            print(f"Loading configuration from {config_path}")
+            config = joblib.load(config_path)
+            use_gender_specific = config.get('use_gender_specific', True)
+            
+            if use_gender_specific:
+                if gender_prediction == 0:  # Male
+                    model_path = config.get('male_model_path', model_path)
+                    scaler_path = config.get('male_scaler_path', scaler_path)
+                else:  # Female
+                    model_path = config.get('female_model_path', model_path)
+                    scaler_path = config.get('female_scaler_path', scaler_path)
+            else:
+                # Use combined model
+                model_path = config.get('combined_model_path', 'models/age_model.joblib')
+                scaler_path = config.get('combined_scaler_path', 'models/age_scaler.joblib')
+                gender_name = "Combined"
         
+        # Check if gender-specific model exists
+        if os.path.exists(model_path) and os.path.exists(scaler_path):
+            print(f"Using {gender_name}-specific age model")
+        else:
+            # Fall back to combined model
+            print(f"Gender-specific model not found, falling back to combined age model")
+            model_path = 'models/age_model.joblib'
+            scaler_path = 'models/age_scaler.joblib'
+            
+            if not os.path.exists(model_path) or not os.path.exists(scaler_path):
+                print(f"Error: Age model or scaler file not found")
+                return None, 0.0
+        
+        # Load model and scaler
         model = joblib.load(model_path)
         scaler = joblib.load(scaler_path)
         
@@ -234,8 +280,14 @@ def predict_age(features_dict):
     except Exception as e:
         print(f"Error during age prediction: {str(e)}")
         import traceback
-        traceback.print_exc()  # Add this to see the full error
-        return None
+        traceback.print_exc()
+        return None, 0.0
+
+# Kept for backward compatibility
+def predict_age(features_dict):
+    """Legacy function that calls the gender-aware age prediction with default gender"""
+    print("Warning: Using legacy age prediction function. For better results, use predict_age_with_gender")
+    return predict_age_with_gender(features_dict, None)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
