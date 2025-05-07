@@ -2,7 +2,7 @@ import librosa
 import numpy as np
 import pandas as pd
 import os
-from sklearn.decomposition import IncrementalPCA
+#from sklearn.decomposition import IncrementalPCA
 from tqdm import tqdm
 
 
@@ -44,6 +44,8 @@ def extract_features(y, sr=16000):
     rms_mean = np.mean(rms)
     rms_std = np.std(rms)
 
+    formants = extract_formants(y, sr)
+
     feature_dict = {}
     for i in range(len(mfcc_mean)):
         feature_dict[f'mfcc_mean_{i+1}'] = mfcc_mean[i]
@@ -57,6 +59,9 @@ def extract_features(y, sr=16000):
         feature_dict[f'mel_mean_{i+1}'] = mel_mean[i]
     for i in range(len(mel_std)):
         feature_dict[f'mel_std_{i+1}'] = mel_std[i]
+
+    for i, formant in enumerate(formants[:4], 1):  # First 4 formants
+        feature_dict[f'formant_{i}'] = formant
 
     feature_dict.update({
         'centroid_mean': centroid_mean,
@@ -74,6 +79,84 @@ def extract_features(y, sr=16000):
     })
 
     return feature_dict
+
+
+def extract_formants(y, sr):
+    """
+    Extract formant frequencies using LPC analysis.
+    
+    Args:
+        y: Audio signal
+        sr: Sample rate
+    
+    Returns:
+        List of formant frequencies (in Hz)
+    """
+    # Pre-emphasis to amplify high frequencies (improves formant detection)
+    y_emph = librosa.effects.preemphasis(y)
+    
+    # Frame the signal (25ms windows with 10ms hop)
+    frame_length = int(sr * 0.025)
+    hop_length = int(sr * 0.010)
+    frames = librosa.util.frame(y_emph, frame_length=frame_length, hop_length=hop_length)
+    
+    # Number of LPC coefficients (rule of thumb: sampling_rate / 1000 + 2)
+    n_lpc = int(sr / 1000) + 2
+    
+    # Initialize array to store formants for each frame
+    all_formants = []
+    
+    # Process each frame
+    for frame in frames.T:
+        # Apply window function
+        frame = frame * np.hamming(len(frame))
+        
+        # LPC analysis
+        a_lpc = librosa.lpc(frame, order=n_lpc)
+        
+        # Find roots of the LPC polynomial
+        roots = np.roots(a_lpc)
+        
+        # Keep only roots with positive imaginary part (and inside unit circle)
+        roots = roots[np.imag(roots) > 0]
+        
+        # Convert roots to frequencies in Hz
+        angles = np.arctan2(np.imag(roots), np.real(roots))
+        formants = angles * (sr / (2 * np.pi))
+        
+        # Sort formants by frequency
+        formants = sorted(formants)
+        
+        # Store formants for this frame
+        if len(formants) > 0:
+            all_formants.append(formants)
+    
+    # If no formants were found, return zeros
+    if not all_formants:
+        return [0, 0, 0, 0]
+    
+    # Average formants across all frames
+    # First, ensure all frames have the same number of formants
+    max_formants = max(len(f) for f in all_formants)
+    padded_formants = []
+    for f in all_formants:
+        if len(f) < max_formants:
+            # Pad with zeros if fewer formants were found
+            padded_formants.append(f + [0] * (max_formants - len(f)))
+        else:
+            padded_formants.append(f)
+    
+    # Convert to numpy array for easy averaging
+    formant_array = np.array(padded_formants)
+    
+    # Calculate mean formants (up to first 4)
+    mean_formants = np.mean(formant_array, axis=0)
+    
+    # Pad with zeros if fewer than 4 formants
+    if len(mean_formants) < 4:
+        mean_formants = np.append(mean_formants, [0] * (4 - len(mean_formants)))
+    
+    return mean_formants[:4]  # Return first 4 formants
 
 
 def create_label_mapping(path='data/filtered_speech_data.csv'):
@@ -104,10 +187,10 @@ def process_batch(audio_files, label_df):
 def run_batched_processing():
     preprocessed_audio_path = "clean_audio"
     output_path = "data/features.csv"
-    output_pca_path = "data/features_pca.csv"
+    #output_pca_path = "data/features_pca.csv"
     label_df = create_label_mapping('data/filtered_speech_data.csv')
     audio_files = librosa.util.find_files(preprocessed_audio_path, ext=['wav', 'mp3'])
-    batch_size = 5000
+    batch_size = 10000
 
     all_dfs = []
     for i in tqdm(range(0, len(audio_files), batch_size), desc="Processing Batches"):
@@ -122,18 +205,18 @@ def run_batched_processing():
     feature_cols = features_df.columns.drop(['filename', 'label'])
     X = features_df[feature_cols].values
 
-    ipca = IncrementalPCA(n_components=min(20, X.shape[1]))
-    for i in range(0, len(X), batch_size):
-        ipca.partial_fit(X[i:i + batch_size])
+    #ipca = IncrementalPCA(n_components=min(20, X.shape[1]))
+    #for i in range(0, len(X), batch_size):
+    #    ipca.partial_fit(X[i:i + batch_size])
 
-    X_pca = np.concatenate([ipca.transform(X[i:i + batch_size]) for i in range(0, len(X), batch_size)], axis=0)
-    pca_cols = [f'PC{i+1}' for i in range(X_pca.shape[1])]
-    pca_df = pd.DataFrame(X_pca, columns=pca_cols)
-    pca_df.insert(0, 'filename', features_df['filename'])
-    pca_df = pd.merge(pca_df, label_df, on='filename', how='left')
-    pca_df.to_csv(output_pca_path, index=False)
-    print(f"Saved PCA features to {output_pca_path}")
-    print(f"Total variance explained: {ipca.explained_variance_ratio_.sum():.2f}")
+    #X_pca = np.concatenate([ipca.transform(X[i:i + batch_size]) for i in range(0, len(X), batch_size)], axis=0)
+    #pca_cols = [f'PC{i+1}' for i in range(X_pca.shape[1])]
+    #pca_df = pd.DataFrame(X_pca, columns=pca_cols)
+    #pca_df.insert(0, 'filename', features_df['filename'])
+    #pca_df = pd.merge(pca_df, label_df, on='filename', how='left')
+    #pca_df.to_csv(output_pca_path, index=False)
+    #print(f"Saved PCA features to {output_pca_path}")
+    #print(f"Total variance explained: {ipca.explained_variance_ratio_.sum():.2f}")
 
 
 if __name__ == "__main__":

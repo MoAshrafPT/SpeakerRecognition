@@ -38,6 +38,13 @@ features += [f"chroma_std_{i}" for i in range(1, 13)]
 features += [f"mel_mean_{i}" for i in range(1, 31)]
 features += [f"mel_std_{i}" for i in range(1, 31)]
 
+# Add formant features
+formant_features = [f'formant_{i}' for i in range(1, 5)]
+for feature in formant_features:
+    if feature in df.columns:
+        features.append(feature)
+        print(f"Including {feature} in model training")
+
 
 # Extract features and target
 X = df[features]
@@ -73,7 +80,6 @@ lightgbm_model = lgb.LGBMClassifier(
     n_estimators=200,
     random_state=42,
     reg_alpha=0.01,
-    reg_lambda=0.01,
 )
 
 # Initialize KNN model

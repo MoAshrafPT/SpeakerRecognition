@@ -4,8 +4,12 @@ import librosa
 import numpy as np
 import pandas as pd
 import joblib
+import warnings
 from preprocess import preprocess_file
 from features import extract_features
+
+# Suppress warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 
 def predict_age(audio_file_path):
     """
@@ -50,7 +54,7 @@ def predict_age(audio_file_path):
             features_dict['pitch_std']
         ])
         
-        # Selected MFCCs (first 5)
+        # Selected MFCCs (first 5 mean, first 12 std)
         for i in range(1, 6):
             features.append(features_dict[f'mfcc_mean_{i}'])
         for i in range(1, 13):
@@ -81,6 +85,11 @@ def predict_age(audio_file_path):
             features.append(features_dict[f'mel_mean_{i}'])
         for i in range(1, 31):
             features.append(features_dict[f'mel_std_{i}'])
+        
+        # Add formant features (if they were included in training)
+        for i in range(1, 5):
+            if f'formant_{i}' in features_dict:
+                features.append(features_dict[f'formant_{i}'])
         
         # Reshape for model input
         X = np.array(features).reshape(1, -1)
@@ -122,6 +131,8 @@ def predict_age(audio_file_path):
         
     except Exception as e:
         print(f"Error during prediction: {str(e)}")
+        import traceback
+        traceback.print_exc()  # Print the full traceback for debugging
         if os.path.exists(temp_output_path):
             os.remove(temp_output_path)
         return None

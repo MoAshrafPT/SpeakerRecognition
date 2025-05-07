@@ -169,10 +169,10 @@ def predict_age(features_dict):
             features_dict['pitch_std']
         ])
         
-        # Selected MFCCs (first 5)
+        # Selected MFCCs (first 5 mean, first 12 std)
         for i in range(1, 6):
             features.append(features_dict[f'mfcc_mean_{i}'])
-        for i in range(1, 6):
+        for i in range(1, 13):  # Changed from range(1, 6) to range(1, 13)
             features.append(features_dict[f'mfcc_std_{i}'])
         
         # Spectral shape
@@ -200,6 +200,11 @@ def predict_age(features_dict):
             features.append(features_dict[f'mel_mean_{i}'])
         for i in range(1, 31):
             features.append(features_dict[f'mel_std_{i}'])
+            
+        # Add formant features
+        for i in range(1, 5):
+            if f'formant_{i}' in features_dict:
+                features.append(features_dict[f'formant_{i}'])
         
         # Reshape for model input
         X = np.array(features).reshape(1, -1)
@@ -228,6 +233,8 @@ def predict_age(features_dict):
         
     except Exception as e:
         print(f"Error during age prediction: {str(e)}")
+        import traceback
+        traceback.print_exc()  # Add this to see the full error
         return None
 
 if __name__ == "__main__":
