@@ -6,11 +6,23 @@ import pandas as pd
 import joblib
 from preprocess import preprocess_file
 from features import extract_features
+import time
 import warnings
 # Filter out specific warnings
 warnings.filterwarnings("ignore", category=UserWarning, message="X does not have valid feature names")
 warnings.filterwarnings("ignore", category=UserWarning, message=".*The tree method `gpu_hist` is deprecated.*")
 warnings.filterwarnings("ignore", category=UserWarning, message=".*Falling back to prediction using DMatrix.*")
+
+class Colors:
+    RESET = "\033[0m"
+    RED = "\033[91m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    MAGENTA = "\033[95m"
+    CYAN = "\033[96m"
+    WHITE = "\033[97m"
+    BOLD = "\033[1m"
 
 def predict_voice_attributes(audio_file_path):
     """
@@ -30,6 +42,7 @@ def predict_voice_attributes(audio_file_path):
     print(f"Processing audio file: {audio_file_path}")
     
     # Step 1: Preprocess the audio file (only need to do this once)
+    start_preprocess = time.time()
     temp_output_path = "temp_processed_audio.wav"
     success = preprocess_file(
         (audio_file_path, temp_output_path),
@@ -37,6 +50,7 @@ def predict_voice_attributes(audio_file_path):
         trim_silence=True,
         reduce_noise=False
     )
+    print(f"{Colors.YELLOW}Preprocessing time: {time.time() - start_preprocess:.2f} seconds{Colors.RESET}")
     
     if not success:
         print("Error: Failed to preprocess the audio file")
@@ -45,14 +59,20 @@ def predict_voice_attributes(audio_file_path):
     try:
         # Step 2: Extract features once for both models
         y, sr = librosa.load(temp_output_path, sr=16000)
+        start_feature_extraction = time.time()
         features_dict = extract_features(y, sr)
+        end_feature_extraction = time.time()
+        print(f"{Colors.MAGENTA}Feature extraction time: {end_feature_extraction - start_feature_extraction:.2f} seconds{Colors.RESET}")
         
         # Step 3: First predict gender
+        start_inference = time.time()
         gender_prediction, gender_confidence = predict_gender(features_dict)
         
         # Step 4: Use gender-specific age prediction
         age_prediction, age_confidence = predict_age_with_gender(features_dict, gender_prediction)
         
+        end_inference = time.time()
+        print(f"{Colors.CYAN}Inference time: {end_inference - start_inference:.2f} seconds {Colors.RESET}")
         # Step 5: Clean up temporary file
         if os.path.exists(temp_output_path):
             os.remove(temp_output_path)
@@ -283,7 +303,7 @@ def predict_age_with_gender(features_dict, gender_prediction):
         traceback.print_exc()
         return None, 0.0
 
-# Kept for backward compatibility
+
 def predict_age(features_dict):
     """Legacy function that calls the gender-aware age prediction with default gender"""
     print("Warning: Using legacy age prediction function. For better results, use predict_age_with_gender")
@@ -295,7 +315,9 @@ if __name__ == "__main__":
         sys.exit(1)
     
     audio_path = sys.argv[1]
+    total_start_time = time.time()
     result = predict_voice_attributes(audio_path)
+    print(f"{Colors.GREEN}Total processing time: {time.time() - total_start_time:.2f} seconds {Colors.RESET}")
     
     if result:
         print("\n=== Final Prediction ===")

@@ -8,31 +8,47 @@ def process_audio(audio_file):
     if audio_file is None:
         return "Please upload an audio file."
     
-    # Create a temporary file for the audio
-    temp_dir = tempfile.mkdtemp()
-    temp_path = os.path.join(temp_dir, "input.wav")
-    
-    # Save the file to the temporary path
-    with open(temp_path, "wb") as f:
-        f.write(audio_file)
-    
-    # Make prediction
-    results = predict_voice_attributes(temp_path)
-    
-    if results:
-        gender = results["gender"]
-        gender_confidence = results["gender_confidence"]
-        age = results["age"]
-        age_confidence = results["age_confidence"]
+    try:
+       
+        if isinstance(audio_file, tuple):
+            # When using microphone recording (sample_rate, audio_data)
+            sample_rate, audio_data = audio_file
+            
+            # Create a temporary file for the audio
+            temp_dir = tempfile.mkdtemp()
+            temp_path = os.path.join(temp_dir, "input.wav")
+            
+            # Import soundfile for saving audio
+            import soundfile as sf
+            sf.write(temp_path, audio_data, sample_rate)
+        else:
+            # When using file upload (direct path)
+            temp_path = audio_file
         
-        output_text = f"## Voice Analysis Results\n\n"
-        output_text += f"**Gender:** {gender} (Confidence: {gender_confidence:.2f})\n\n"
-        output_text += f"**Age Group:** {age} (Confidence: {age_confidence:.2f})\n\n"
-        output_text += f"**Speaker Profile:** {results['combined_label']}"
+        print(f"Processing audio file: {temp_path}")
         
-        return output_text
-    else:
-        return "Analysis failed. Please try a different audio sample."
+        # Make prediction
+        results = predict_voice_attributes(temp_path)
+        
+        if results:
+            gender = results["gender"]
+            gender_confidence = results["gender_confidence"]
+            age = results["age"]
+            age_confidence = results["age_confidence"]
+            
+            output_text = f"## Voice Analysis Results\n\n"
+            output_text += f"**Gender:** {gender} (Confidence: {gender_confidence:.2f})\n\n"
+            output_text += f"**Age Group:** {age} (Confidence: {age_confidence:.2f})\n\n"
+            output_text += f"**Speaker Profile:** {results['combined_label']}"
+            
+            return output_text
+        else:
+            return "Analysis failed. Please try a different audio sample."
+    
+    except Exception as e:
+        import traceback
+        trace = traceback.format_exc()
+        return f"Error processing audio: {str(e)}\n\n```\n{trace}\n```"
 
 # Create Gradio interface
 with gr.Blocks(title="Voice Gender and Age Classifier") as demo:
